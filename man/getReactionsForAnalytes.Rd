@@ -8,7 +8,10 @@ getReactionsForAnalytes(
   analytes,
   analyteType = "metabolites",
   namesOrIds = "ids",
-  onlyHuman = T
+  onlyHumanMets = F,
+  humanProtein = F,
+  includeTransportRxns = F,
+  rxnDirs = c("UN")
 )
 }
 \arguments{
@@ -18,10 +21,16 @@ getReactionsForAnalytes(
 
 \item{namesOrIds}{indicates if input analyte list contains identifiers or analyte names}
 
-\item{onlyHuman}{boolean to only return pathways with only human metabolites and human enzymes (dev in progress...)}
+\item{onlyHumanMets}{boolean to only return pathways containing only human metabolites (ChEBI ontology) (dev in progress)}
+
+\item{humanProtein}{boolean to only control pathways catalyzed by a human proteins (having human Uniprot) (dev in progress)}
+
+\item{includeTransportRxns}{if TRUE, returns metabolic and transport reactions}
+
+\item{rxnDirs}{character vector of length > 1, specifying reaction directions to return  c("UN", "LR", "RL", "BD", "ALL"), default = c("UN").}
 }
 \value{
-a dataframe of reaction information on each input analyte
+a list of reaction information on each input analyte, separate data.frame for metabolites, genes, and common reactions
 }
 \description{
 getReactionsForAnalytes

@@ -7,12 +7,14 @@
 #' @param namesOrIds indicates if input analyte list contains identifiers or analyte names
 #' @param onlyHumanMets boolean to only return pathways containing only human metabolites (ChEBI ontology) (dev in progress)
 #' @param humanProtein boolean to only control pathways catalyzed by a human proteins (having human Uniprot) (dev in progress)
+#' @param includeTransportRxns if TRUE, returns metabolic and transport reactions
+#' @param rxnDirs character vector of length > 1, specifying reaction directions to return  c("UN", "LR", "RL", "BD", "ALL"), default = c("UN").
 #'
 #' @return a list of reaction information on each input analyte, separate data.frame for metabolites, genes, and common reactions
 #' @export
 #'
 #' @examples
-getReactionsForAnalytes <- function(analytes, analyteType='metabolites', namesOrIds='ids', onlyHumanMets=F, humanProtein=F) {
+getReactionsForAnalytes <- function(analytes, analyteType='metabolites', namesOrIds='ids', onlyHumanMets=F, humanProtein=F, includeTransportRxns=F, rxnDirs=c("UN")) {
 
   genes <- data.frame()
   metabolites <- data.frame()
@@ -24,18 +26,24 @@ getReactionsForAnalytes <- function(analytes, analyteType='metabolites', namesOr
     resultMets <- analyteSourceInfo[analyteSourceInfo$geneOrCompound == 'compound',]
 
     if(!is.null(resultMets) && nrow(resultMets)>0) {
+
+      print("Retrieving reactions for compounds")
+
       mets <- resultMets[,c('sourceId', 'rampId')]
       rampIds <- unique(unlist(mets$rampId))
-      mdf <- getReactionsForRaMPCompoundIds(rampIds)
+      mdf <- getReactionsForRaMPCompoundIds(rampCompoundIds=rampIds, onlyHumanMets=onlyHumanMets, humanProtein=humanProtein, includeTransportRxns=includeTransportRxns, rxnDirs=rxnDirs)
       if(nrow(mdf) > 0) {
         mdf <- merge(mets, mdf, by.x='rampId', by.y='ramp_cmpd_id')
       }
     }
 
     if(!is.null(resultGenes) && nrow(resultGenes)>0) {
+
+      print("Retrieving reactions for genes/proteins")
+
       genes <- resultGenes[,c('sourceId', 'rampId')]
       rampIds <- unique(unlist(genes$rampId))
-      gdf <- getReactionsForRaMPGeneIds(rampIds)
+      gdf <- getReactionsForRaMPGeneIds(rampGeneIds=rampIds, onlyHumanMets=onlyHumanMets, humanProtein=humanProtein, includeTransportRxns)
       if(nrow(gdf) > 0) {
         gdf <- merge(genes, gdf, by.x='rampId', by.y='ramp_gene_id')
       }
@@ -65,6 +73,7 @@ getReactionsForAnalytes <- function(analytes, analyteType='metabolites', namesOr
       gRxn <- gdf[gdf$ramp_rxn_id %in% commonRxnIds,]
 
       # one row per reaction, include concat mets, concat proteins
+      # probably a more streamlined way to do this...
       commonRampRxnList <- c()
       commonRxnList <- c()
       mRxnSourceIds <- c()
@@ -109,36 +118,49 @@ getReactionsForAnalytes <- function(analytes, analyteType='metabolites', namesOr
     }
   }
 
-
   return(resultList)
 }
 
 #' getReactionsForRaMPCompoundIds returns reactions for a collection of ramp compound ids
 #'
 #' @param rampCompoundIds list of ramp compound ids
+#' @param onlyHumanMets boolean to only return pathways containing only human metabolites (ChEBI ontology) (dev in progress)
+#' @param humanProtein boolean to only control pathways catalyzed by a human proteins (having human Uniprot) (dev in progress)
+#' @param includeTransportRxns if TRUE, returns metabolic and transport reactions
 #'
 #' @return returns a dataframe of reaction information for each ramp compound id
 #'
 #' @examples
-getReactionsForRaMPCompoundIds <- function(rampCompoundIds) {
-  print("getting reactions for compounds")
+getReactionsForRaMPCompoundIds <- function(rampCompoundIds, onlyHumanMets=F, humanProtein=F, includeTransportRxns=F, rxnDirs=c("UN")) {
 
-  idStr <- analyteListToAnalyteString(rampCompoundIds)
+  idStr <- listToQueryString(rampCompoundIds)
   query <- paste0("select mr.ramp_rxn_id, mr.ramp_cmpd_id, mr.met_source_id, mr.substrate_product, mr.is_cofactor, mr.met_name,
   mr.ramp_rxn_id, rxn.rxn_source_id, rxn.is_transport, rxn.label, rxn.direction, rxn.equation, rxn.html_equation, rxn.ec_num, rxn.has_human_prot, rxn.only_human_mets
   from reaction2met mr, reaction rxn
   where mr.ramp_cmpd_id in (",idStr,") and rxn.ramp_rxn_id = mr.ramp_rxn_id")
 
-  print("")
-  print(query)
+  if(length(rxnDirs) == 1) {
+    query <- paste0(query, " and rxn.direction = '",rxnDirs[1],"'")
+  } else if(length(rxnDirs)>1) {
+    query <- paste0(query, " and rxn.direction in (",listToQueryString(rxnDirs),")")
+  } else {
+    print("rxnDirs must be of length > 0")
+  }
+
+  if(humanProtein) {
+    query <- paste0(query," and rxn.has_human_prot = 1")
+  }
+
+  if(onlyHumanMets) {
+    query <- paste0(query, " and rxn.only_human_mets = 1")
+  }
+
+  if(!includeTransportRxns) {
+    query <- paste0(query, " and rxn.is_transport = 0")
+  }
 
   conn <- connectToRaMP()
   df <- RMariaDB::dbGetQuery(conn,query)
-
-  print(dim(df))
-
-  print(colnames(df))
-
   RMariaDB::dbDisconnect(conn=conn)
   return(df)
 }
@@ -148,29 +170,43 @@ getReactionsForRaMPCompoundIds <- function(rampCompoundIds) {
 #' getReactionsForRaMPGeneIds returns reactions for a collection of ramp compound ids
 #'
 #' @param rampGeneIds list of ramp compound ids
+#' @param onlyHumanMets boolean to only return pathways containing only human metabolites (ChEBI ontology) (dev in progress)
+#' @param humanProtein boolean to only control pathways catalyzed by a human proteins (having human Uniprot) (dev in progress)
+#' @param includeTransportRxns if TRUE, returns metabolic and transport reactions
 #'
 #' @return returns a dataframe of reaction information for each ramp compound id
 #'
 #' @examples
-getReactionsForRaMPGeneIds <- function(rampGeneIds) {
-  print("getting reactions for genes")
+getReactionsForRaMPGeneIds <- function(rampGeneIds, onlyHumanMets=F, humanProtein=F, includeTransportRxns=F, rxnDirs=c("UN")) {
 
-  idStr <- analyteListToAnalyteString(rampGeneIds)
+  idStr <- listToQueryString(rampGeneIds)
   query <- paste0("select gr.ramp_rxn_id, gr.ramp_gene_id, gr.uniprot, gr.protein_name,
   gr.ramp_rxn_id, rxn.rxn_source_id, rxn.is_transport, rxn.label, rxn.direction, rxn.equation, rxn.html_equation, rxn.ec_num, rxn.has_human_prot, rxn.only_human_mets
   from reaction2protein gr, reaction rxn
   where gr.ramp_gene_id in (",idStr,") and rxn.ramp_rxn_id = gr.ramp_rxn_id")
 
-  print("")
-  print(query)
+  if(length(rxnDirs) == 1) {
+    query <- paste0(query, " and rxn.direction = '",rxnDirs[1],"'")
+  } else if(length(rxnDirs)>1) {
+    query <- paste0(query, " and rxn.direction in (",listToQueryString(rxnDirs),")")
+  } else {
+    print("rxnDirs must be of length > 0")
+  }
+
+  if(humanProtein) {
+    query <- paste0(query, " and rxn.has_human_prot = 1")
+  }
+
+  if(onlyHumanMets) {
+    query <- paste0(query, " and rxn.only_human_mets = 1")
+  }
+
+  if(!includeTransportRxns) {
+    query <- paste0(query, " and rxn.is_transport = 0")
+  }
 
   conn <- connectToRaMP()
   df <- RMariaDB::dbGetQuery(conn,query)
-
-  print(dim(df))
-
-  print(colnames(df))
-
   RMariaDB::dbDisconnect(conn=conn)
   return(df)
 }
@@ -194,33 +230,26 @@ getReactionsForRaMPGeneIds <- function(rampGeneIds) {
 #' @examples
 getRampSourceInfoFromAnalyteIDs <- function(analytes) {
 
-  analyteStr <- analyteListToAnalyteString(analytes)
+  analyteStr <- listToQueryString(analytes)
 
-  query = paste("select * from source where sourceId in (",analyteStr,")")
-
-  print(query)
+  query = paste("select distinct sourceId, rampId, geneOrCompound from source where sourceId in (",analyteStr,")")
 
   conn <- connectToRaMP()
-
   df <- RMariaDB::dbGetQuery(conn,query)
-
-  print(dim(df))
-  print(colnames(df))
-  print(df)
   RMariaDB::dbDisconnect(conn=conn)
 
   return(df)
 }
 
 
-#' analyteListToAnalyteString utility method to convert an id list to a comma separate string, with single quoted values.
+#' listToQueryString utility method to convert an id list to a comma separate string, with single quoted values.
 #'
 #' @param analytes list of analytes (can be names or ids)
 #'
 #' @return comma separated list of single quoted analyte ids or names
 #'
 #' @examples
-analyteListToAnalyteString <- function(analytes) {
+listToQueryString <- function(analytes) {
   analyteStr <- paste0("'", paste0(analytes, collapse = "','"), "'", sep="")
   return (analyteStr)
 }

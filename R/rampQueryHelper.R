@@ -131,7 +131,7 @@ rampFastPathFromSource<- function(sourceid,find_synonym = FALSE){
   id_list <- unique(df2$pathwayRampId)
   id_list <- sapply(id_list,shQuote)
   id_list <- paste(id_list,collapse = ",")
-  print(id_list)
+
   query3 <- paste0("select * from pathway where pathwayRampId in (",
                    id_list,");")
   con <- connectToRaMP()
@@ -667,7 +667,6 @@ FilterFishersResults <- function(fishers_df, pval_type = 'fdr', pval_cutoff = 0.
 
       #if(class(fishers_df[[result]]) == 'data.frame') {
        if(is(fishers_df[[result]], 'data.frame')) {
-        print(result)
         resultDf <- fishers_df[[result]]
         resultDf <- subset(resultDf, resultDf[[criteriaCol]] <= pval_cutoff)
         fishers_df[[result]] <- resultDf
@@ -958,4 +957,25 @@ chemicalClassSurveyRampIdsFullPopConn <- function(mets, conn, inferIdMapping=TRU
   return(result)
 }
 
+#' Utility method that returns pathway ids and pathway ramp ids for in input list of pathway source ids
+#' @param pwIds a vector of pathway source id to query on
+#' @returns returns a data frame containing query pathway source ids and corresponding pathway ramp ids
+getPathwayRampIdsFromPathwayIds <- function(pwIds) {
+
+  res = NULL
+
+  if(length(pwIds)>0) {
+
+    ids <- sapply(pwIds, shQuote)
+    ids <- paste(ids, collapse=",")
+    sql = paste0("select sourceId as pathwayId, pathwayRampId from pathway where sourceId in (",ids,")")
+    conn <- connectToRaMP()
+    res <- RMariaDB::dbGetQuery(conn, sql)
+    RMariaDB::dbDisconnect(conn)
+  } else {
+    res <- data.frame(matrix(ncol=2,nrow=0))
+    colnames(res) <- c("pathwayId", "pathwayRampId")
+  }
+  return(res)
+}
 
